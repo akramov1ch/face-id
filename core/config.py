@@ -3,13 +3,13 @@ from typing import List
 
 # Google Sheets ustunlari (A=0, B=1, C=2...)
 SHEET_COLUMNS = {
-    "branch_name": 1,      # A ustun: Filial nomi
-    "full_name": 2,        # B ustun: F.I.Sh
-    "phone": 3,            # C ustun: Telefon
-    "account_id": 4,       # D ustun: ID
+    "branch_name": 2,      # A ustun: Filial nomi
+    "full_name": 3,        # B ustun: F.I.Sh
+    "phone": 9,            # C ustun: Telefon
+    "account_id": 16,       # D ustun: ID
 }
 
-START_ROW = 2
+START_ROW = 3
 
 class Settings(BaseSettings):
     # Telegram
