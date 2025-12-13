@@ -3,10 +3,10 @@ from typing import List
 
 # Google Sheets ustunlari (A=0, B=1, C=2...)
 SHEET_COLUMNS = {
-    "branch_name": 2,      # A ustun: Filial nomi
-    "full_name": 3,        # B ustun: F.I.Sh
-    "phone": 9,            # C ustun: Telefon
-    "account_id": 16,       # D ustun: ID
+    "branch_name": 1,      # A ustun: Filial nomi
+    "full_name": 2,        # B ustun: F.I.Sh
+    "phone": 8,            # C ustun: Telefon
+    "account_id": 15,      # D ustun: ID
 }
 
 START_ROW = 3
@@ -29,9 +29,11 @@ class Settings(BaseSettings):
     # --- GOOGLE SHEETS ---
     GOOGLE_SPREADSHEET_ID: str
     GOOGLE_CREDS_FILE: str = "google_creds.json"
-    
-    # O'ZGARTIRILDI: Default qiymatni bo'sh qoldiramiz
     GOOGLE_WORKSHEET_NAMES: str = "" 
+
+    # --- REDIS (CACHE) --- YANGI QO'SHILDI
+    REDIS_HOST: str = "localhost"  # Dockerda "redis" deb o'zgaradi
+    REDIS_PORT: int = 6379
 
     @property
     def google_worksheet_name_list(self) -> List[str]:

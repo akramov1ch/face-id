@@ -1,4 +1,5 @@
 import gspread
+from gspread.utils import rowcol_to_a1  # <--- YANGI IMPORT
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta, timezone
 import logging
@@ -20,19 +21,14 @@ class GoogleSheetManager:
             return ""
 
     def get_all_employees_raw(self):
-        """
-        Xodimlarni o'qiydi va har bir qator uchun:
-        (worksheet_object, row_number, data_dict) qaytaradi.
-        """
+        # ... (Bu funksiya o'zgarishsiz qoladi) ...
         results = []
-        
         try:
             spreadsheet = self.client.open_by_key(settings.GOOGLE_SPREADSHEET_ID)
         except Exception as e:
             logger.error(f"Spreadsheetni ochishda xato: {e}")
             return []
 
-        # Varaqlarni aniqlash
         worksheets_to_process = []
         if settings.google_worksheet_name_list:
             for name in settings.google_worksheet_name_list:
@@ -44,14 +40,12 @@ class GoogleSheetManager:
                 worksheets_to_process.append(spreadsheet.get_worksheet(0))
             except: pass
 
-        # O'qish
         for worksheet in worksheets_to_process:
             try:
                 rows = worksheet.get_all_values()[START_ROW-1:]
                 logger.info(f"--- O'qilmoqda: {worksheet.title} ---")
 
                 for i, row in enumerate(rows):
-                    # Haqiqiy qator raqami (Exceldagi kabi)
                     real_row_num = i + START_ROW 
                     
                     acc_id = self._safe_get(row, SHEET_COLUMNS['account_id'])
@@ -59,7 +53,6 @@ class GoogleSheetManager:
                     branch_name = self._safe_get(row, SHEET_COLUMNS['branch_name'])
                     phone = self._safe_get(row, SHEET_COLUMNS['phone'])
                     
-                    # Ism bo'lmasa tashlab ketamiz (ID bo'lmasa ham olamiz, chunki uni biz yaratamiz)
                     if not full_name:
                         continue
 
@@ -69,8 +62,6 @@ class GoogleSheetManager:
                         "branch_name": branch_name,
                         "phone": phone
                     }
-                    
-                    # Worksheet obyekti va qator raqamini ham qaytaramiz
                     results.append((worksheet, real_row_num, data))
 
             except Exception as e:
@@ -78,24 +69,38 @@ class GoogleSheetManager:
 
         return results
 
-    def write_id_to_cell(self, worksheet, row_num, new_id):
+    # --- YANGI OPTIMALLASHTIRILGAN FUNKSIYA ---
+    def batch_update_ids(self, worksheet, updates):
         """
-        Google Sheetdagi aniq katakka yangi ID ni yozib qo'yadi.
+        Bir nechta ID larni bitta so'rov bilan yozadi.
+        updates = [ (row_num, new_id), (row_num, new_id), ... ]
         """
+        if not updates:
+            return True
+
         try:
-            # gspread da ustunlar 1 dan boshlanadi. 
-            # Bizning configda A=0, B=1... shuning uchun +1 qilamiz
+            # Configdagi ustun raqami (0 dan boshlanadi, gspreadga 1 dan kerak)
             col_num = SHEET_COLUMNS['account_id'] + 1
             
-            worksheet.update_cell(row_num, col_num, new_id)
-            logger.info(f"Sheetga yozildi: Qator {row_num}, ID {new_id}")
+            batch_data = []
+            for row_num, new_id in updates:
+                # Katak manzilini aniqlash (Masalan: P4, P10)
+                cell_address = rowcol_to_a1(row_num, col_num)
+                batch_data.append({
+                    'range': cell_address,
+                    'values': [[str(new_id)]]
+                })
+
+            # Bitta so'rov bilan hammasini yuborish
+            worksheet.batch_update(batch_data)
+            logger.info(f"✅ Batch update: {len(updates)} ta ID yozildi ({worksheet.title})")
             return True
         except Exception as e:
-            logger.error(f"Sheetga yozishda xato: {e}")
+            logger.error(f"❌ Batch update xatosi: {e}")
             return False
 
     def log_attendance(self, sheet_id: str, employee_name: str, employee_id: str, action: str, device_ip: str):
-        # ... (bu qism o'zgarishsiz qoladi) ...
+        # ... (Bu funksiya o'zgarishsiz qoladi) ...
         try:
             if not sheet_id: return
             try:
@@ -103,7 +108,6 @@ class GoogleSheetManager:
             except:
                 return
             
-            # O'zbekiston vaqti (UTC+5)
             uz_tz = timezone(timedelta(hours=5))
             now = datetime.now(uz_tz)
             

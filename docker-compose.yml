@@ -17,6 +17,18 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:  # <--- YANGI QO'SHILDI
+    image: redis:alpine
+    container_name: faceid_redis
+    restart: always
+    networks:
+      - faceid_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
   app:
     build:
       context: .
@@ -26,12 +38,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:  # <--- Redis ishga tushishini kutadi
+        condition: service_healthy
     env_file:
       - .env
     environment:
       - TZ=Asia/Tashkent
+      - REDIS_HOST=redis  # <--- Docker ichida host nomi servis nomi bilan bir xil bo'ladi
     ports:
-      - "8000:8000"
+      - "3000:3000"
     volumes:
       - .:/app
     dns:

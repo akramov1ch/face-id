@@ -4,10 +4,13 @@ import json
 import logging
 import requests
 from datetime import datetime, timedelta, timezone
+
+# Loyiha modullari
 from .database import get_db
 from .models import Device, Employee, Branch, DeviceType
 from .sheets import GoogleSheetManager
 from .config import settings
+from .cache import cache  # <--- Kesh menejeri ulandi
 
 # Loglarni sozlash
 logging.basicConfig(level=logging.INFO)
@@ -64,39 +67,75 @@ async def receive_event(request: Request, db: Session = Depends(get_db)):
             # Muhim ma'lumotlar
             device_ip = data.get('ipAddress') # Qurilma IP si
             employee_id = details.get('employeeNoString') # Xodim ID si
-            sub_event_type = details.get('subEventType') # 21=Kirish, 22=Chiqish (taxminan)
+            sub_event_type = details.get('subEventType') # 21=Kirish, 22=Chiqish
             
             if not device_ip or not employee_id:
                 return {"status": "ignored", "msg": "Missing IP or ID"}
 
-            # 3. Bazadan tekshirish
-            # a) Qurilmani topamiz
-            device = db.query(Device).filter(Device.ip_address == device_ip).first()
-            if not device:
-                logger.warning(f"Noma'lum qurilmadan signal: {device_ip}")
-                return {"status": "ignored", "msg": "Unknown Device"}
+            # =================================================================
+            # 3. OPTIMALLASHTIRILGAN QIDIRUV (REDIS + DB)
+            # =================================================================
 
-            # b) Xodimni topamiz
-            employee = db.query(Employee).filter(Employee.account_id == employee_id).first()
+            # A) QURILMA VA FILIALNI ANIQLASH
+            # Avval keshdan qaraymiz
+            device_info = cache.get_device_info(device_ip)
             
-            if employee:
-                # Ismni chiroyli qilish (Masalan: "eshmat toshmatov" -> "Eshmat Toshmatov")
-                emp_name = employee.full_name.title()
+            if not device_info:
+                # Keshda yo'q -> Bazadan olamiz
+                device = db.query(Device).filter(Device.ip_address == device_ip).first()
+                if not device:
+                    logger.warning(f"Noma'lum qurilmadan signal: {device_ip}")
+                    return {"status": "ignored", "msg": "Unknown Device"}
+
+                branch = db.query(Branch).filter(Branch.id == device.branch_id).first()
+                if not branch:
+                    return {"status": "error", "msg": "Branch not found"}
+                
+                # Keshga yozib qo'yamiz (keyingi safar uchun)
+                cache.set_device_info(device, branch)
+                
+                # O'zgaruvchilarni to'g'irlaymiz
+                device_type_val = device.device_type.value
+                branch_name = branch.name
+                sheet_id = branch.attendance_sheet_id
             else:
-                emp_name = "Noma'lum Xodim"
+                # Keshdan oldik (Juda tez!)
+                device_type_val = device_info['device_type']
+                branch_name = device_info['branch_name']
+                sheet_id = device_info['sheet_id']
 
-            # c) Filialni topamiz
-            branch = db.query(Branch).filter(Branch.id == device.branch_id).first()
-            if not branch:
-                return {"status": "error", "msg": "Branch not found"}
+            # B) XODIMNI ANIQLASH
+            # Avval keshdan qaraymiz
+            emp_info = cache.get_employee_info(employee_id)
+            
+            if not emp_info:
+                # Keshda yo'q -> Bazadan olamiz
+                employee = db.query(Employee).filter(Employee.account_id == employee_id).first()
+                
+                if employee:
+                    emp_name = employee.full_name.title()
+                    notif_chat_id = employee.notification_chat_id
+                    # Keshga yozamiz
+                    cache.set_employee_info(employee)
+                else:
+                    emp_name = "Noma'lum Xodim"
+                    notif_chat_id = None
+            else:
+                # Keshdan oldik
+                emp_name = emp_info['full_name'].title()
+                notif_chat_id = emp_info['chat_id']
 
-            # 4. Harakatni aniqlash (Kirish/Chiqish)
+            # =================================================================
+            # 4. MANTIQ (LOGIC)
+            # =================================================================
+
+            # Harakatni aniqlash (Kirish/Chiqish)
             action = "Noma'lum"
             
             # Agar qurilma turi aniq bo'lsa (faqat Kirish yoki faqat Chiqish)
-            if device.device_type == DeviceType.ENTRY:
+            if device_type_val == "entry":
                 action = "KIRISH"
-            elif device.device_type == DeviceType.EXIT:
+            elif device_type_val == "exit":
                 action = "CHIQISH"
             else:
                 # Agar Universal bo'lsa, kodga qaraymiz
@@ -108,18 +147,18 @@ async def receive_event(request: Request, db: Session = Depends(get_db)):
                     action = f"O'TISH (Kod: {sub_event_type})"
 
             # 5. Sheetga yozish
-            logger.info(f"SIGNAL: {branch.name} | {emp_name} | {action}")
+            logger.info(f"SIGNAL: {branch_name} | {emp_name} | {action}")
             
             sheet_manager.log_attendance(
-                sheet_id=branch.attendance_sheet_id,
+                sheet_id=sheet_id,
                 employee_name=emp_name,
                 employee_id=employee_id,
                 action=action,
                 device_ip=device_ip
             )
 
-            # 6. TELEGRAMGA XABAR YUBORISH (YANGI QISM)
-            if employee and employee.notification_chat_id:
+            # 6. TELEGRAMGA XABAR YUBORISH
+            if notif_chat_id:
                 # Emoji tanlash
                 emoji = "✅" if action == "KIRISH" else "❌" if action == "CHIQISH" else "⚠️"
                 
@@ -130,12 +169,12 @@ async def receive_event(request: Request, db: Session = Depends(get_db)):
                 alert_text = (
                     f"{emoji} **DAVOMAT BILDIRISHNOMASI**\n\n"
                     f"👤 **Xodim:** {emp_name}\n"
-                    f"🏢 **Filial:** {branch.name}\n"
+                    f"🏢 **Filial:** {branch_name}\n"
                     f"🔄 **Holat:** {action}\n"
                     f"⏰ **Vaqt:** {current_time}"
                 )
                 
-                send_telegram_alert(employee.notification_chat_id, alert_text)
+                send_telegram_alert(notif_chat_id, alert_text)
 
         return {"status": "success", "msg": "Processed"}
 

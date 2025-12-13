@@ -1,5 +1,6 @@
 import random
 import string
+import time
 from telegram import Update, ReplyKeyboardRemove, ReplyKeyboardMarkup
 from telegram.ext import CallbackContext, ConversationHandler
 from sqlalchemy.orm import Session
@@ -201,19 +202,19 @@ def get_dev_type(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ============================================================================
-# 3. GOOGLE SHEETS SINXRONIZATSIYA (SYNC & ID GENERATION) - YANGILANGAN
+# 3. GOOGLE SHEETS SINXRONIZATSIYA (OPTIMALLASHTIRILGAN - BATCH UPDATE)
 # ============================================================================
 
 def sync_sheets(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID: return
 
-    msg = update.message.reply_text("⏳ **Sinxronizatsiya va ID yaratish boshlanmoqda...**\nBu biroz vaqt olishi mumkin.", parse_mode='Markdown')
+    msg = update.message.reply_text("⏳ **Sinxronizatsiya boshlanmoqda...**\nMa'lumotlar tahlil qilinmoqda.", parse_mode='Markdown')
     
     db = SessionLocal()
     manager = GoogleSheetManager()
     
     try:
-        # 1. Sheetdan ma'lumotlarni "xom" holatda olamiz (worksheet va qator raqami bilan)
+        # 1. Sheetdan ma'lumotlarni "xom" holatda olamiz
         raw_data = manager.get_all_employees_raw()
         
         if not raw_data:
@@ -226,15 +227,19 @@ def sync_sheets(update: Update, context: CallbackContext):
         # ID bo'yicha qidirish uchun lug'at
         db_emp_by_id = {e.account_id: e for e in all_employees}
         
-        # Ism va Filial bo'yicha qidirish uchun lug'at (ID yo'q bo'lganda ishlatiladi)
-        # Kalit: (branch_id, normalized_full_name)
+        # Ism va Filial bo'yicha qidirish uchun lug'at
         db_emp_by_name = {(e.branch_id, normalize_text(e.full_name)): e for e in all_employees}
 
         count_new = 0
         count_updated = 0
         count_generated = 0
-        count_recovered = 0 # Bazadan topib Sheetga yozilganlar
+        count_recovered = 0 
         not_found_branches = set()
+
+        # --- BATCH UPDATE UCHUN RO'YXATLAR ---
+        # Har bir worksheet uchun alohida ro'yxat qilamiz
+        # { worksheet_object: [(row_num, new_id), ...], ... }
+        updates_by_worksheet = {}
 
         # 3. Har bir qatorni aylanamiz
         for worksheet, row_num, data in raw_data:
@@ -247,6 +252,10 @@ def sync_sheets(update: Update, context: CallbackContext):
             if not branch:
                 not_found_branches.add(b_name)
                 continue 
+
+            # Agar bu worksheet uchun ro'yxat bo'lmasa, yaratamiz
+            if worksheet not in updates_by_worksheet:
+                updates_by_worksheet[worksheet] = []
 
             # --- ALGORITM BOSHLANDI ---
 
@@ -267,7 +276,6 @@ def sync_sheets(update: Update, context: CallbackContext):
                         branch_id=branch.id
                     )
                     db.add(new_emp)
-                    # Yangi qo'shilganini lug'atga ham qo'shamiz (keyingi qatorlar uchun)
                     db_emp_by_id[sheet_acc_id] = new_emp
                     count_new += 1
 
@@ -280,12 +288,11 @@ def sync_sheets(update: Update, context: CallbackContext):
                     # HA, BOR -> Bazadagi ID ni Sheetga yozish
                     existing_emp = db_emp_by_name[key]
                     
-                    # Sheetga yozib qo'yamiz
-                    success = manager.write_id_to_cell(worksheet, row_num, existing_emp.account_id)
-                    if success:
-                        count_recovered += 1
+                    # BATCH LISTGA QO'SHISH (Recover)
+                    updates_by_worksheet[worksheet].append((row_num, existing_emp.account_id))
+                    count_recovered += 1
                     
-                    # Ma'lumotlarni yangilash (agar kerak bo'lsa)
+                    # Ma'lumotlarni yangilash
                     if existing_emp.full_name != full_name:
                         existing_emp.full_name = full_name
                         count_updated += 1
@@ -297,10 +304,9 @@ def sync_sheets(update: Update, context: CallbackContext):
                     while db.query(Employee).filter(Employee.account_id == new_id).first():
                         new_id = generate_new_id()
                     
-                    # Sheetga yozish
-                    success = manager.write_id_to_cell(worksheet, row_num, new_id)
-                    if success:
-                        count_generated += 1
+                    # BATCH LISTGA QO'SHISH (Generate)
+                    updates_by_worksheet[worksheet].append((row_num, new_id))
+                    count_generated += 1
                     
                     # Bazaga qo'shish
                     new_emp = Employee(
@@ -315,7 +321,16 @@ def sync_sheets(update: Update, context: CallbackContext):
                     db_emp_by_name[(branch.id, normalize_text(full_name))] = new_emp
                     count_new += 1
         
+        # 4. Barcha o'zgarishlarni bazaga saqlash
         db.commit()
+
+        # 5. Google Sheetga ommaviy yozish (Batch Update)
+        if count_generated > 0 or count_recovered > 0:
+            msg.edit_text("💾 **Google Sheetga IDlar yozilmoqda...**\n(Batch Update rejimi)", parse_mode='Markdown')
+            
+            for ws, updates in updates_by_worksheet.items():
+                if updates:
+                    manager.batch_update_ids(ws, updates)
         
         result_text = (
             f"✅ **Jarayon yakunlandi!**\n\n"
