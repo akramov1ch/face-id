@@ -130,7 +130,7 @@ async def receive_event(request: Request, db: Session = Depends(get_db)):
                 elif sub_event_type == 22: action = "CHIQISH"
                 else: action = f"O'TISH ({sub_event_type})"
 
-            # --- YANGI: HOLATNI TEKSHIRISH (STATE CHECK) ---
+            # --- HOLATNI TEKSHIRISH (STATE CHECK) ---
             # Faqat KIRISH va CHIQISH uchun mantiq ishlaydi.
             if action in ["KIRISH", "CHIQISH"]:
                 should_log = cache.check_action_state(employee_id, action)
@@ -144,12 +144,12 @@ async def receive_event(request: Request, db: Session = Depends(get_db)):
             # 5. Sheetga yozish
             logger.info(f"SIGNAL: {branch_name} | {emp_name} | {action}")
             
+            # O'ZGARDI: device_ip olib tashlandi
             sheet_manager.log_attendance(
                 sheet_id=sheet_id,
                 employee_name=emp_name,
                 employee_id=employee_id,
-                action=action,
-                device_ip=device_ip
+                action=action
             )
 
             # 6. Telegramga xabar
