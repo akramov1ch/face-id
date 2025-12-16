@@ -15,26 +15,18 @@ from core.config import settings
 # --- YORDAMCHI FUNKSIYALAR ---
 
 def get_db():
-    """Baza sessiyasini yaratish"""
     return SessionLocal()
 
 def cancel(update: Update, context: CallbackContext):
-    """Jarayonni bekor qilish"""
     update.message.reply_text("🚫 Jarayon bekor qilindi.", reply_markup=keyboards.get_admin_keyboard())
     return ConversationHandler.END
 
 def generate_new_id():
-    """6 xonali tasodifiy raqamli ID yaratadi (masalan: 102938)"""
     return ''.join(random.choices(string.digits, k=6))
 
 def normalize_text(text):
-    """Matnni solishtirish uchun tozalash (kichik harf, bo'sh joylarsiz)"""
     if not text: return ""
     return text.lower().replace(" ", "")
-
-# ============================================================================
-# 1. FILIAL QO'SHISH (ADD BRANCH)
-# ============================================================================
 
 def add_branch_start(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID:
@@ -66,7 +58,6 @@ def get_branch_sheet(update: Update, context: CallbackContext):
     text = update.message.text
     if text == "⬅️ Bekor qilish": return cancel(update, context)
     
-    # Sheet ID ni tozalash (agar to'liq URL tashlansa)
     sheet_id = text
     if "/d/" in text:
         try:
@@ -98,10 +89,6 @@ def get_branch_sheet(update: Update, context: CallbackContext):
     
     return ConversationHandler.END
 
-# ============================================================================
-# 2. QURILMA QO'SHISH (ADD DEVICE)
-# ============================================================================
-
 def add_device_start(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID: return ConversationHandler.END
     
@@ -113,7 +100,6 @@ def add_device_start(update: Update, context: CallbackContext):
         update.message.reply_text("❌ Tizimda filiallar yo'q. Avval filial qo'shing!")
         return ConversationHandler.END
 
-    # Filiallar ro'yxatini tugma qilamiz
     buttons = [[b.name] for b in branches]
     buttons.append(["⬅️ Bekor qilish"])
     
@@ -201,10 +187,6 @@ def get_dev_type(update: Update, context: CallbackContext):
         db.close()
     return ConversationHandler.END
 
-# ============================================================================
-# 3. GOOGLE SHEETS SINXRONIZATSIYA (OPTIMALLASHTIRILGAN - BATCH UPDATE)
-# ============================================================================
-
 def sync_sheets(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID: return
 
@@ -214,20 +196,16 @@ def sync_sheets(update: Update, context: CallbackContext):
     manager = GoogleSheetManager()
     
     try:
-        # 1. Sheetdan ma'lumotlarni "xom" holatda olamiz
         raw_data = manager.get_all_employees_raw()
         
         if not raw_data:
             msg.edit_text("❌ Sheet bo'sh yoki o'qib bo'lmadi (Loglarni tekshiring).")
             return
 
-        # 2. Bazadagi barcha xodimlarni xotiraga olamiz (tezkor qidirish uchun)
         all_employees = db.query(Employee).all()
         
-        # ID bo'yicha qidirish uchun lug'at
         db_emp_by_id = {e.account_id: e for e in all_employees}
         
-        # Ism va Filial bo'yicha qidirish uchun lug'at
         db_emp_by_name = {(e.branch_id, normalize_text(e.full_name)): e for e in all_employees}
 
         count_new = 0
@@ -236,40 +214,29 @@ def sync_sheets(update: Update, context: CallbackContext):
         count_recovered = 0 
         not_found_branches = set()
 
-        # --- BATCH UPDATE UCHUN RO'YXATLAR ---
-        # Har bir worksheet uchun alohida ro'yxat qilamiz
-        # { worksheet_object: [(row_num, new_id), ...], ... }
         updates_by_worksheet = {}
 
-        # 3. Har bir qatorni aylanamiz
         for worksheet, row_num, data in raw_data:
-            sheet_acc_id = data['account_id'] # Sheetdagi ID
+            sheet_acc_id = data['account_id']
             full_name = data['full_name']
             b_name = data['branch_name']
 
-            # Filialni tekshirish
             branch = db.query(Branch).filter(Branch.name == b_name).first()
             if not branch:
                 not_found_branches.add(b_name)
                 continue 
 
-            # Agar bu worksheet uchun ro'yxat bo'lmasa, yaratamiz
             if worksheet not in updates_by_worksheet:
                 updates_by_worksheet[worksheet] = []
 
-            # --- ALGORITM BOSHLANDI ---
-
-            # 1-HOLAT: Sheetda ID bor
             if sheet_acc_id:
                 if sheet_acc_id in db_emp_by_id:
-                    # Bazada bor -> Update
                     existing_emp = db_emp_by_id[sheet_acc_id]
                     if existing_emp.full_name != full_name or existing_emp.branch_id != branch.id:
                         existing_emp.full_name = full_name
                         existing_emp.branch_id = branch.id
                         count_updated += 1
                 else:
-                    # Bazada yo'q -> Create (Sheetdagi ID bilan)
                     new_emp = Employee(
                         account_id=sheet_acc_id, 
                         full_name=full_name, 
@@ -279,36 +246,27 @@ def sync_sheets(update: Update, context: CallbackContext):
                     db_emp_by_id[sheet_acc_id] = new_emp
                     count_new += 1
 
-            # 2-HOLAT: Sheetda ID YO'Q
             else:
-                # Bazada shu filial va ism bilan xodim bormi?
                 key = (branch.id, normalize_text(full_name))
                 
                 if key in db_emp_by_name:
-                    # HA, BOR -> Bazadagi ID ni Sheetga yozish
                     existing_emp = db_emp_by_name[key]
                     
-                    # BATCH LISTGA QO'SHISH (Recover)
                     updates_by_worksheet[worksheet].append((row_num, existing_emp.account_id))
                     count_recovered += 1
                     
-                    # Ma'lumotlarni yangilash
                     if existing_emp.full_name != full_name:
                         existing_emp.full_name = full_name
                         count_updated += 1
                 else:
-                    # YO'Q -> Yangi ID generatsiya qilish (Create)
                     new_id = generate_new_id()
                     
-                    # Unikallikni tekshirish
                     while db.query(Employee).filter(Employee.account_id == new_id).first():
                         new_id = generate_new_id()
                     
-                    # BATCH LISTGA QO'SHISH (Generate)
                     updates_by_worksheet[worksheet].append((row_num, new_id))
                     count_generated += 1
                     
-                    # Bazaga qo'shish
                     new_emp = Employee(
                         account_id=new_id, 
                         full_name=full_name, 
@@ -316,15 +274,12 @@ def sync_sheets(update: Update, context: CallbackContext):
                     )
                     db.add(new_emp)
                     
-                    # Lug'atlarni yangilash
                     db_emp_by_id[new_id] = new_emp
                     db_emp_by_name[(branch.id, normalize_text(full_name))] = new_emp
                     count_new += 1
         
-        # 4. Barcha o'zgarishlarni bazaga saqlash
         db.commit()
 
-        # 5. Google Sheetga ommaviy yozish (Batch Update)
         if count_generated > 0 or count_recovered > 0:
             msg.edit_text("💾 **Google Sheetga IDlar yozilmoqda...**\n(Batch Update rejimi)", parse_mode='Markdown')
             
@@ -351,10 +306,6 @@ def sync_sheets(update: Update, context: CallbackContext):
     finally:
         db.close()
 
-# ============================================================================
-# 4. MA'LUMOTLARNI KO'RISH (LIST INFO)
-# ============================================================================
-
 def list_info(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID: return
 
@@ -379,10 +330,6 @@ def list_info(update: Update, context: CallbackContext):
     
     db.close()
     update.message.reply_text(text, parse_mode='Markdown')
-
-# ============================================================================
-# 5. BILDIRISHNOMA SOZLASH (NOTIFICATION LINK)
-# ============================================================================
 
 def set_notification_start(update: Update, context: CallbackContext):
     if update.effective_user.id != settings.SUPER_ADMIN_ID: return ConversationHandler.END

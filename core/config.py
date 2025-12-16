@@ -1,38 +1,32 @@
 from pydantic_settings import BaseSettings
 from typing import List
 
-# Google Sheets ustunlari (A=0, B=1, C=2...)
 SHEET_COLUMNS = {
-    "branch_name": 1,      # A ustun: Filial nomi
-    "full_name": 2,        # B ustun: F.I.Sh
-    "phone": 8,            # C ustun: Telefon
-    "account_id": 15,      # D ustun: ID
+    "branch_name": 1,     
+    "full_name": 2,        
+    "phone": 8,           
+    "account_id": 15,      
 }
 
 START_ROW = 3
 
 class Settings(BaseSettings):
-    # Telegram
     BOT_TOKEN: str
     SUPER_ADMIN_ID: int
 
-    # Database
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str
     POSTGRES_HOST: str
     POSTGRES_PORT: int
 
-    # Server
     SERVER_PORT: int
 
-    # --- GOOGLE SHEETS ---
     GOOGLE_SPREADSHEET_ID: str
     GOOGLE_CREDS_FILE: str = "google_creds.json"
     GOOGLE_WORKSHEET_NAMES: str = "" 
 
-    # --- REDIS (CACHE) --- YANGI QO'SHILDI
-    REDIS_HOST: str = "localhost"  # Dockerda "redis" deb o'zgaradi
+    REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
 
     @property

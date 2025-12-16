@@ -4,11 +4,6 @@ from bot import keyboards
 from core.config import settings
 
 def start(update: Update, context: CallbackContext):
-    """
-    /start bosilganda ishlaydi.
-    Admin bo'lsa -> Admin panelni ochadi.
-    Xodim bo'lsa -> ID so'raydi.
-    """
     user_id = update.effective_user.id
     
     if user_id == settings.SUPER_ADMIN_ID:
@@ -27,12 +22,8 @@ def start(update: Update, context: CallbackContext):
         )
 
 def cancel(update: Update, context: CallbackContext):
-    """
-    Jarayonni bekor qilish (ConversationHandler uchun).
-    """
     user_id = update.effective_user.id
     
-    # Agar admin bo'lsa, menyuni qaytaramiz
     if user_id == settings.SUPER_ADMIN_ID:
         markup = keyboards.get_admin_keyboard()
     else:

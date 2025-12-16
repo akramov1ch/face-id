@@ -4,9 +4,7 @@ from telegram.ext import CallbackContext
 from core.config import settings
 
 def super_admin_only(func):
-    """
-    Faqat Super Admin foydalana oladigan funksiyalar uchun dekorator.
-    """
+
     @wraps(func)
     def wrapped(update: Update, context: CallbackContext, *args, **kwargs):
         user_id = update.effective_user.id

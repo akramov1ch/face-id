@@ -6,7 +6,6 @@ engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
-    """Baza sessiyasini ochish va yopish uchun generator"""
     db = SessionLocal()
     try:
         yield db

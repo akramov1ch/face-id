@@ -9,7 +9,6 @@ import io
 def handle_id(update: Update, context: CallbackContext):
     text = update.message.text.strip()
     
-    # Admin buyruqlarini o'tkazib yuborish
     if text.startswith("➕") or text.startswith("🔄"): return
 
     db = SessionLocal()
@@ -20,12 +19,10 @@ def handle_id(update: Update, context: CallbackContext):
         update.message.reply_text("❌ Bunday ID topilmadi. Qaytadan urinib ko'ring.")
         return ConversationHandler.END
     
-    # Xodim ma'lumotlarini saqlab olamiz
     context.user_data['emp_id'] = employee.account_id
     context.user_data['emp_name'] = employee.full_name
     context.user_data['branch_id'] = employee.branch_id
     
-    # Filial nomini olish uchun
     branch_name = employee.branch.name
     db.close()
 
@@ -48,13 +45,11 @@ def handle_photo(update: Update, context: CallbackContext):
 
     msg = update.message.reply_text("⏳ Rasm qabul qilindi. Filialdagi barcha qurilmalarga yuklanmoqda...")
 
-    # 1. Rasmni yuklab olish
     photo_file = update.message.photo[-1].get_file()
     f = io.BytesIO()
     photo_file.download(out=f)
     image_bytes = f.getvalue()
 
-    # 2. Filialdagi barcha qurilmalarni olish
     db = SessionLocal()
     devices = db.query(Device).filter(Device.branch_id == branch_id).all()
     
@@ -63,14 +58,11 @@ def handle_photo(update: Update, context: CallbackContext):
         db.close()
         return ConversationHandler.END
 
-    # Qurilmalar ro'yxatini tayyorlash
     dev_list = [{'ip': d.ip_address, 'user': d.username, 'pass': d.password} for d in devices]
     db.close()
 
-    # 3. Yuklash (Core Logic)
     results = upload_to_branch_devices(dev_list, user_id, image_bytes)
 
-    # 4. Natijani ko'rsatish
     report = "📊 **Yuklash natijalari:**\n\n"
     success_count = 0
     

@@ -3,7 +3,7 @@ from telegram import ReplyKeyboardMarkup
 def get_admin_keyboard():
     keyboard = [
         ["➕ Filial qo'shish", "➕ Qurilma qo'shish"],
-        ["🔔 Bildirishnoma ulash", "🔄 Google Sheets Sync"], # <-- O'zgardi
+        ["🔔 Bildirishnoma ulash", "🔄 Google Sheets Sync"], 
         ["📋 Ma'lumotlar"],
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
